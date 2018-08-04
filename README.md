@@ -1,14 +1,6 @@
-title: 用Python统计GitLab上的代码提交行数
-date: 2018-08-04 19:02:29
-category: [技术]
-tag: [教程,Python,Gitlab]
-
-----------
-
 
 需要统计Gitlab上所有仓库、所有人的代码提交状况。
 在网上找了找，发现基本上都是基于已经checkout到本地的统计，如果要统计服务器上所有仓库的，则没有现成的工具，所有我用Python写了一个。
-放到GitHub上了:[https://github.com/ccbuildpro/GitLabCommitStatics](https://github.com/ccbuildpro/GitLabCommitStatics)
 
 一，核心思路
 ----------
