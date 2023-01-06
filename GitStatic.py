@@ -16,17 +16,23 @@ export_path = "/tmp"
 t_from = "2018-07-23"
 """统计的时间区间-结束日期"""
 t_end = "2018-07-30"
+utc_8 = datetime.timezone(datetime.timedelta(hours=8))
 """统计的时间区间-开始日期，datetime对象"""
 date_from = datetime.datetime.strptime(t_from, '%Y-%m-%d')
+date_from = date_from.replace(tzinfo=utc_8)
 """统计的时间区间-结束日期，datetime对象"""
 date_end = datetime.datetime.strptime(t_end, '%Y-%m-%d')
+date_end = date_end.replace(tzinfo=utc_8)
 """一个线程锁"""
 lock = threading.RLock()
+countLock = threading.Lock()
 
 user_unknown = {}
 user_email_alias_mapping = {}
 user_email_name_mapping = {}
-
+total_project_commit_count = 0
+projects_commit_count = {}
+project_count = 0
 
 class GitlabApiCountTrueLeTrue:
     """
@@ -49,32 +55,35 @@ class GitlabApiCountTrueLeTrue:
         :return:
         """
         threads = []
-        # 获取服务器上的所有仓库，每个仓库新建一个线程
+        # 获取服务器上的所有仓库，每个仓库新建一个线程  1,3表示1-2页 这里per_page最大100，指定1000也没用
         for i in range(1, 3):
             # 线上gitlab可用，问题是没有全部显示
-            url = '%s/api/v3/projects/all' \
+            url = '%s/api/v4/projects' \
                   '?private_token=%s&per_page=1000&page=%d&order_by=last_activity_at' % (
                       git_root_url, git_token, i)
-            r1 = requests.get(url)  # 请求url，传入header，ssl认证为false
-            r2 = r1.json()  # 显示json字符串
-
-            for r3 in r2:
-                value = r3['default_branch']
-                last_active_time = r3['last_activity_at']
-                if value is None:
+            response = requests.get(url)  # 请求url，传入header，ssl认证为false
+            projects = response.json()  # 显示json字符串
+            with countLock:
+                global project_count
+                project_count += len(projects)
+            for project in projects:
+                default_branch = project['default_branch']
+                last_active_time = project['last_activity_at']
+                if default_branch is None:
                     continue
-                days = date_from - datetime.datetime.strptime(last_active_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+                days = date_from - datetime.datetime.strptime(last_active_time, '%Y-%m-%dT%H:%M:%S.%f%z')
                 # 如果project的最后更新时间比起始时间小，则continue
                 if days.days > 1:
                     continue
                 project_info = ProjectInfo()
-                project_info.project_id = r3['id']
-                project_info.name = r3['name']
-                project_info.project_desc = r3['description']
-                project_info.project_url = r3['web_url']
-                project_info.path = r3['path']
+                project_info.project_id = project['id']
+                project_info.name = project['name']
+                project_info.project_desc = project['description']
+                project_info.project_url = project['web_url']
+                project_info.path = project['path']
+                project_info.default_branch = default_branch
                 # 构件好线程
-                t = threading.Thread(target=self.get_branches, args=(r3['id'], project_info))
+                t = threading.Thread(target=self.get_branches, args=(project['id'], project_info))
                 threads.append(t)
         # 所有线程逐一开始
         for t in threads:
@@ -110,24 +119,24 @@ class GitlabApiCountTrueLeTrue:
 
         print("start get branch list %d,url=%s" % (project_id, url))
 
-        r1 = requests.get(url)  # 请求url，传入header，ssl认证为false
-        r2 = r1.json()  # 显示json字符串
-        if not r2:
+        response = requests.get(url)  # 请求url，传入header，ssl认证为false
+        branches = response.json()  # 显示json字符串
+        if not branches:
             return
         # branch的map，key为branch名称，value为按照提交者email汇总的，key为email的子map集合
         branch_map = {}
-        # 主动获取master分支的提交
-        detail_map = self.get_commits(project_id, project_info.project_url, 'master')
-        print("get commits finish project_id=%d branch master" % project_id)
+        # 主动获取master分支的提交 master不一定是默认分支 主动获取干什么呢？这里取消了
+        # detail_map = self.get_commits(project_id, project_info.project_url, project_info.default_branch)
+        # print("get commits finish project_id=%d branch master" % project_id)
 
-        if detail_map:
-            branch_map['master'] = detail_map
-        for r3 in r2:
-            branch_name = r3['name']
+        # if detail_map:
+        #     branch_map[project_info.default_branch] = detail_map
+        for branch in branches:
+            branch_name = branch['name']
             if branch_name is None:
                 continue
             # 如果仓库已经被Merge了，则不再处理
-            if r3['merged']:
+            if branch['merged']:
                 continue
             detail_map = self.get_commits(project_id, project_info.project_url, branch_name)
             if not detail_map:
@@ -176,19 +185,26 @@ class GitlabApiCountTrueLeTrue:
         """
         since_date = date_from.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         until_date = date_end.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
-        url = '%s/api/v4/projects/%s/repository/commits?page=1&per_page=1000&ref_name=%s&since=%s&until=%s&private_token=%s' % (
+        # 这里per_page大一点，不加不够
+        url = '%s/api/v4/projects/%s/repository/commits?page=1&per_page=10000&ref_name=%s&since=%s&until=%s&private_token=%s' % (
             git_root_url, project_id, branch_name, since_date, until_date, git_token)
-        r1 = requests.get(url)  # 请求url，传入header，ssl认证为false
-        r2 = r1.json()  # 显示json字符串
-        if not r2:
+        response = requests.get(url)  # 请求url，传入header，ssl认证为false
+        commits = response.json()  # 显示json字符串
+        if not commits:
             return
         print('start get_commits,projectID=%d,branch=%s,url=%s' % (project_id, branch_name, url))
 
-        detail_map = {}
-
-        for r3 in r2:
-            commit_id = r3['id']
+        details = {}
+        project_commit_count = len(commits)
+        with countLock:
+            global total_project_commit_count 
+            total_project_commit_count += project_commit_count
+            if project_url in projects_commit_count:
+                projects_commit_count[project_url] += project_commit_count
+            else:
+                projects_commit_count[project_url] = project_commit_count
+        for commit in commits:
+            commit_id = commit['id']
             if commit_id is None:
                 continue
             # 在这里进行commit去重判断
@@ -209,15 +225,15 @@ class GitlabApiCountTrueLeTrue:
                     detail.author_email, project_id, branch_name, project_url))
 
             # 根据email纬度，统计提交数据
-            exist_detail = detail_map.get(detail.author_email)
+            exist_detail = details.get(detail.author_email)
             if exist_detail is None:
-                detail_map[detail.author_email] = detail
+                details[detail.author_email] = detail
             else:
                 exist_detail.total += detail.total
                 exist_detail.additions += detail.additions
                 exist_detail.deletions += detail.deletions
-                detail_map[detail.author_email] = exist_detail
-        return detail_map
+                details[detail.author_email] = exist_detail
+        return details
 
 
 def get_commit_detail(project_id, commit_id):
@@ -319,8 +335,12 @@ class ProjectInfo(json.JSONEncoder):
     path = None
     name = None
     commit_map = None
+    default_branch = None
 
 
 if __name__ == '__main__':
     gitlab4 = GitlabApiCountTrueLeTrue()
     gitlab4.get_projects()
+    print("项目总提交数：%d" % total_project_commit_count)
+    for key, value in projects_commit_count.items():
+        print("项目id=%s,提交数=%d" % (key, value))
