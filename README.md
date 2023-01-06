@@ -19,7 +19,7 @@
 ### 获取仓库列表
 
 ```
-http://gitlab.example.com/api/v3/projects/all?private_token=%s&per_page=1000&page=%d&order_by=last_activity_at
+http://gitlab.example.com/api/v4/projects?private_token=%s&per_page=100&page=%d&order_by=last_activity_at
 ```
 
 你需要填上gitlab的url、你的token、和page(也就是第几页)。
@@ -34,7 +34,7 @@ http://gitlab.example.com/api/v4/projects/%s/repository/branches?private_token=%
 
 ### 获取单个分支的commit列表
 ```
-http://gitlab.example.com/api/v4/projects/%s/repository/commits?page=1&per_page=1000&ref_name=%s&since=%s&until=%s&private_token=%s
+http://gitlab.example.com/api/v4/projects/%s/repository/commits?page=1&per_page=10000&ref_name=%s&since=%s&until=%s&private_token=%s
 ```
 你需要填上gitlab的url、project id、你的token，ref_name（分支名称）、since（其实日期）、until（截止日期）。
 这两个日期都需要是“``%Y-%m-%dT%H:%M:%S.%fZ``”的格式
